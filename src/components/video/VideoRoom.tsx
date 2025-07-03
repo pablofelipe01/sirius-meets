@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAgora } from '@/hooks/video/useAgora'
 import VideoPlayer from './VideoPlayer'
 import VideoControls from './VideoControls'
+import ChatPanel from './ChatPanel'
 import { agoraConfig } from '@/lib/agora'
 import toast from 'react-hot-toast'
 
@@ -17,6 +18,26 @@ interface VideoRoomProps {
 export default function VideoRoom({ channelName, userName, onLeave }: VideoRoomProps) {
   const router = useRouter()
   const [isJoining, setIsJoining] = useState(true)
+  const [showChat, setShowChat] = useState(false)
+  const [messages, setMessages] = useState<unknown[]>([])
+  const hasJoinedRef = useRef(false)
+
+  const handleDataMessage = useCallback((userId: string | number, messageText: string) => {
+    try {
+      const messageData = JSON.parse(messageText)
+      const newMessage = {
+        id: Date.now().toString() + '-' + userId,
+        userId: userId.toString(),
+        userName: messageData.userName || `Usuario ${userId}`,
+        text: messageData.text,
+        timestamp: new Date(),
+        isLocal: false
+      }
+      setMessages(prev => [...prev, newMessage])
+    } catch (error) {
+      console.error('Error procesando mensaje:', error)
+    }
+  }, [])
 
   const {
     localVideoTrack,
@@ -32,28 +53,27 @@ export default function VideoRoom({ channelName, userName, onLeave }: VideoRoomP
     leave,
     toggleAudio,
     toggleVideo,
+    sendDataMessage,
   } = useAgora({
     appId: agoraConfig.appId,
     channel: channelName,
+    onDataMessage: handleDataMessage,
   })
 
-  // Primer useEffect - solo para logging
+  // Único useEffect para manejar la conexión
   useEffect(() => {
-    console.log('🎥 Componente VideoRoom montado')
-    console.log('📺 Canal:', channelName)
-    console.log('👤 Usuario:', userName)
-  }, [channelName, userName])
-
-  // Segundo useEffect - para unirse cuando el cliente esté listo
-  useEffect(() => {
-    if (!isClientReady) {
-      console.log('⏳ Esperando cliente...')
+    if (!isClientReady || hasJoinedRef.current) {
       return
     }
 
     const initializeRoom = async () => {
-      console.log('✅ Cliente listo, uniéndose al canal...')
+      console.log('🎥 Iniciando sala de video...')
+      console.log('📺 Canal:', channelName)
+      console.log('👤 Usuario:', userName)
+      
+      hasJoinedRef.current = true
       setIsJoining(true)
+      
       try {
         await join()
         setIsJoining(false)
@@ -62,23 +82,63 @@ export default function VideoRoom({ channelName, userName, onLeave }: VideoRoomP
         console.error('Error joining room:', error)
         toast.error('Error al unirse a la reunión')
         setIsJoining(false)
+        hasJoinedRef.current = false
       }
     }
 
     initializeRoom()
+  }, [isClientReady, channelName, userName])
 
+  // Cleanup al desmontar
+  useEffect(() => {
     return () => {
-      leave()
+      if (hasJoinedRef.current) {
+        console.log('🧹 Limpiando recursos de video...')
+        leave()
+      }
     }
-  }, [isClientReady]) // Solo ejecutar cuando isClientReady cambie
+  }, [])
 
   const handleLeave = async () => {
-    await leave()
-    toast.success('Has salido de la reunión')
+    try {
+      await leave()
+      toast.success('Has salido de la reunión')
+    } catch (error) {
+      console.error('Error al salir:', error)
+    }
+    
     if (onLeave) {
       onLeave()
     } else {
       router.push('/meetings')
+    }
+  }
+
+  const handleToggleChat = () => {
+    setShowChat(!showChat)
+  }
+
+  const handleSendMessage = async (text: string) => {
+    const newMessage = {
+      id: Date.now().toString(),
+      userId: 'local',
+      userName: userName,
+      text: text,
+      timestamp: new Date(),
+      isLocal: true
+    }
+    setMessages(prev => [...prev, newMessage])
+    
+    // Enviar mensaje a través de Agora
+    if (sendDataMessage) {
+      const messageData = JSON.stringify({
+        userName: userName,
+        text: text
+      })
+      const sent = await sendDataMessage(messageData)
+      if (!sent) {
+        toast.error('Error al enviar el mensaje')
+      }
     }
   }
 
@@ -94,37 +154,58 @@ export default function VideoRoom({ channelName, userName, onLeave }: VideoRoomP
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900">
-      {/* Video Grid */}
-      <div className="flex-1 p-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 h-full">
-          {/* Local Video */}
-          <VideoPlayer
-            videoTrack={localVideoTrack}
-            isLocal={true}
-            userName={userName}
-          />
-
-          {/* Remote Videos */}
-          {remoteUsers.map((user) => (
+    <div className="flex h-screen bg-gray-900">
+      {/* Main content */}
+      <div className="flex-1 flex flex-col">
+        {/* Video Grid */}
+        <div className="flex-1 p-4">
+          <div className={`grid gap-4 h-full ${
+            showChat 
+              ? 'grid-cols-1 md:grid-cols-2' 
+              : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+          }`}>
+            {/* Local Video */}
             <VideoPlayer
-              key={user.uid}
-              videoTrack={user.videoTrack}
-              audioTrack={user.audioTrack}
-              userName={`Usuario ${user.uid}`}
+              videoTrack={localVideoTrack}
+              isLocal={true}
+              userName={userName}
             />
-          ))}
+
+            {/* Remote Videos */}
+            {remoteUsers.map((user) => (
+              <VideoPlayer
+                key={user.uid}
+                videoTrack={user.videoTrack}
+                audioTrack={user.audioTrack}
+                userName={`Usuario ${user.uid}`}
+              />
+            ))}
+          </div>
         </div>
+
+        {/* Controls */}
+        <VideoControls
+          audioEnabled={isAudioEnabled}
+          videoEnabled={isVideoEnabled}
+          showChat={showChat}
+          onToggleAudio={toggleAudio}
+          onToggleVideo={toggleVideo}
+          onToggleChat={handleToggleChat}
+          onLeave={handleLeave}
+        />
       </div>
 
-      {/* Controls */}
-      <VideoControls
-        audioEnabled={isAudioEnabled}
-        videoEnabled={isVideoEnabled}
-        onToggleAudio={toggleAudio}
-        onToggleVideo={toggleVideo}
-        onLeave={handleLeave}
-      />
+      {/* Chat Panel */}
+      {showChat && (
+        <div className="w-80 h-full">
+          <ChatPanel
+            userName={userName}
+            userId="local"
+            messages={messages}
+            onSendMessage={handleSendMessage}
+          />
+        </div>
+      )}
     </div>
   )
 }

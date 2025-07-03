@@ -13,9 +13,10 @@ interface UseAgoraProps {
   channel: string
   token?: string | null
   uid?: string | number | null
+  onDataMessage?: (userId: string | number, message: string) => void
 }
 
-export function useAgora({ appId, channel, token = null, uid = null }: UseAgoraProps) {
+export function useAgora({ appId, channel, token = null, uid = null, onDataMessage }: UseAgoraProps) {
   const [client, setClient] = useState<IAgoraRTCClient | null>(null)
   const [localVideoTrack, setLocalVideoTrack] = useState<ILocalVideoTrack | null>(null)
   const [localAudioTrack, setLocalAudioTrack] = useState<ILocalAudioTrack | null>(null)
@@ -24,6 +25,7 @@ export function useAgora({ appId, channel, token = null, uid = null }: UseAgoraP
   const [isAudioEnabled, setIsAudioEnabled] = useState(true)
   const [isVideoEnabled, setIsVideoEnabled] = useState(true)
   const [isClientReady, setIsClientReady] = useState(false)
+  const [dataChannel, setDataChannel] = useState<number | null>(null)
 
   // Initialize Agora client
   useEffect(() => {
@@ -53,10 +55,20 @@ export function useAgora({ appId, channel, token = null, uid = null }: UseAgoraP
       setRemoteUsers(prev => prev.filter(u => u.uid !== user.uid))
     })
 
+    // Listener para mensajes de datos
+    agoraClient.on('stream-message', (userId, data) => {
+      console.log('📨 Mensaje recibido de:', userId)
+      const decoder = new TextDecoder()
+      const message = decoder.decode(data)
+      if (onDataMessage) {
+        onDataMessage(userId, message)
+      }
+    })
+
     return () => {
       agoraClient.removeAllListeners()
     }
-  }, [])
+  }, [onDataMessage])
 
   // Join channel
   const join = async () => {
@@ -87,13 +99,25 @@ export function useAgora({ appId, channel, token = null, uid = null }: UseAgoraP
 
       // Join the channel
       console.log('🚪 Uniéndose al canal...')
-      await client.join(appId, channel, token, uid)
-      console.log('✅ Unido al canal exitosamente')
+      const userUid = await client.join(appId, channel, token, uid)
+      console.log('✅ Unido al canal exitosamente con UID:', userUid)
       
       // Publish local tracks
       console.log('📡 Publicando tracks...')
       await client.publish([audioTrack, videoTrack])
       console.log('✅ Tracks publicados')
+      
+      // Crear canal de datos DESPUÉS de publicar
+      try {
+        // Pequeña espera para asegurar que la conexión esté estable
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        
+        const dataChannelId = await client.createDataStream({ reliable: true, ordered: true })
+        setDataChannel(dataChannelId)
+        console.log('📡 Canal de datos creado con ID:', dataChannelId)
+      } catch (error) {
+        console.error('Error creando canal de datos:', error)
+      }
       
       setIsConnected(true)
     } catch (error) {
@@ -118,6 +142,7 @@ export function useAgora({ appId, channel, token = null, uid = null }: UseAgoraP
       setLocalVideoTrack(null)
       setRemoteUsers([])
       setIsConnected(false)
+      setDataChannel(null)
     } catch (error) {
       console.error('Error leaving channel:', error)
     }
@@ -141,6 +166,25 @@ export function useAgora({ appId, channel, token = null, uid = null }: UseAgoraP
     setIsVideoEnabled(enabled)
   }
 
+  // Send data message
+  const sendDataMessage = async (message: string) => {
+    if (!client || dataChannel === null || dataChannel === undefined) {
+      console.error('No hay canal de datos disponible', { client: !!client, dataChannel })
+      return false
+    }
+    
+    try {
+      const encoder = new TextEncoder()
+      const data = encoder.encode(message)
+      await client.sendStreamMessage(dataChannel, data)
+      console.log('💬 Mensaje enviado por canal:', dataChannel, 'Mensaje:', message)
+      return true
+    } catch (error) {
+      console.error('Error enviando mensaje:', error)
+      return false
+    }
+  }
+
   return {
     localVideoTrack,
     localAudioTrack,
@@ -153,5 +197,6 @@ export function useAgora({ appId, channel, token = null, uid = null }: UseAgoraP
     leave,
     toggleAudio,
     toggleVideo,
+    sendDataMessage,
   }
 }

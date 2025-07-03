@@ -1,20 +1,24 @@
 'use client'
 
-import { Mic, MicOff, Video, VideoOff, PhoneOff } from 'lucide-react'
+import { Mic, MicOff, Video, VideoOff, PhoneOff, MessageSquare } from 'lucide-react'
 
 interface VideoControlsProps {
   audioEnabled: boolean
   videoEnabled: boolean
+  showChat?: boolean
   onToggleAudio: () => void
   onToggleVideo: () => void
+  onToggleChat?: () => void
   onLeave: () => void
 }
 
 export default function VideoControls({
   audioEnabled,
   videoEnabled,
+  showChat = false,
   onToggleAudio,
   onToggleVideo,
+  onToggleChat,
   onLeave
 }: VideoControlsProps) {
   return (
@@ -52,6 +56,21 @@ export default function VideoControls({
           <VideoOff className="h-5 w-5 text-white" />
         )}
       </button>
+
+      {/* Chat Toggle */}
+      {onToggleChat && (
+        <button
+          onClick={onToggleChat}
+          className={`p-3 rounded-full transition-colors ${
+            showChat 
+              ? 'bg-purple-600 hover:bg-purple-700' 
+              : 'bg-gray-700 hover:bg-gray-600'
+          }`}
+          title={showChat ? 'Ocultar chat' : 'Mostrar chat'}
+        >
+          <MessageSquare className="h-5 w-5 text-white" />
+        </button>
+      )}
 
       {/* Leave Button */}
       <button
