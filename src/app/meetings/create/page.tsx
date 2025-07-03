@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createSupabaseClient } from '@/lib/supabase'
 
 export default function CreateMeetingPage() {
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<unknown>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   
@@ -93,6 +93,20 @@ export default function CreateMeetingPage() {
       if (error) throw error
 
       console.log('✅ Reunión creada:', data)
+      // Agregar al creador como participante
+const { error: participantError } = await supabase
+  .from('meeting_participants')
+  .insert([{
+    meeting_id: data.id,
+    user_id: user.id,
+    participant_role: 'host',
+    joined_at: new Date().toISOString()
+  }])
+
+if (participantError) {
+  console.error('Error agregando participante:', participantError)
+}
+
       alert('¡Reunión creada exitosamente!')
       router.push('/dashboard')
 
@@ -135,6 +149,60 @@ export default function CreateMeetingPage() {
           >
             ← Volver al Dashboard
           </button>
+<button
+  type="button"
+  onClick={async () => {
+    setSaving(true)
+    try {
+      // Crear reunión inmediata con datos por defecto
+      const now = new Date()
+      const end = new Date(now.getTime() + 60 * 60 * 1000) // 1 hora
+      
+      const meetingData = {
+        title: `Reunión Rápida - ${now.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}`,
+        description: 'Reunión inmediata',
+        meeting_type: 'virtual',
+        scheduled_start: now.toISOString(),
+        scheduled_end: end.toISOString(),
+        host_id: user.id,
+        max_participants: 10,
+        invitation_code: generateInvitationCode(),
+        agora_channel_name: generateChannelName()
+      }
+
+      // Crear reunión
+      const { data: meeting, error } = await supabase
+        .from('meetings')
+        .insert([meetingData])
+        .select()
+        .single()
+
+      if (error) throw error
+
+      // Agregar como participante
+      await supabase
+        .from('meeting_participants')
+        .insert([{
+          meeting_id: meeting.id,
+          user_id: user.id,
+          participant_role: 'host',
+          joined_at: new Date().toISOString()
+        }])
+
+      // Ir directamente a la sala de video
+      router.push(`/meetings/${meeting.id}/video`)
+      
+    } catch (error) {
+      console.error('Error creando reunión inmediata:', error)
+      toast.error('Error al crear reunión inmediata')
+      setSaving(false)
+    }
+  }}
+  disabled={saving}
+  className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+>
+  {saving ? '⏳ Creando...' : '⚡ Reunión Inmediata'}
+</button>
         </div>
       </div>
 
@@ -176,7 +244,7 @@ export default function CreateMeetingPage() {
             </label>
             <select
               value={meetingType}
-              onChange={(e) => setMeetingType(e.target.value as any)}
+              onChange={(e) => setMeetingType(e.target.value as unknown)}
               className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="virtual">🖥️ Virtual (solo online)</option>

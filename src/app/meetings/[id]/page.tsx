@@ -30,7 +30,7 @@ interface Meeting {
   max_participants: number
   host_id: string
   invitation_code: string
-  agora_channel: string
+  agora_channel_name: string
   created_at: string
   profiles: {
     full_name: string | null
@@ -67,10 +67,11 @@ export default function MeetingDetailsPage({ params }: { params: Promise<{ id: s
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
   const [showInviteModal, setShowInviteModal] = useState(false)
-  const [participants, setParticipants] = useState<any[]>([])
-  const [invitations, setInvitations] = useState<any[]>([])
+  const [participants, setParticipants] = useState<unknown[]>([])
+  const [invitations, setInvitations] = useState<unknown[]>([])
   
   const router = useRouter()
   const supabase = createSupabaseClient()
@@ -181,24 +182,23 @@ export default function MeetingDetailsPage({ params }: { params: Promise<{ id: s
   }
 
   function handleJoinMeeting() {
-    if (!meeting) return
-    
-    const status = getMeetingStatus(meeting)
-    
-    if (status.text === '📅 Programada') {
-      toast.error('⏰ La reunión aún no ha comenzado')
-      return
-    }
-    
-    if (status.text === '✅ Completada') {
-      toast.error('❌ Esta reunión ya ha finalizado')
-      return
-    }
-    
-    // Por ahora solo mostramos un mensaje
-    // Aquí es donde integraremos el SDK de video de Sirius Agentics IA
-    toast.success('🎥 Preparando sala de reunión...')
+  if (!meeting) return
+  
+  const status = getMeetingStatus(meeting)
+  
+  if (status.text === '📅 Programada') {
+    toast.error('⏰ La reunión aún no ha comenzado')
+    return
   }
+  
+  if (status.text === '✅ Completada') {
+    toast.error('❌ Esta reunión ya ha finalizado')
+    return
+  }
+  
+  // Redirigir a la sala de video
+  router.push(`/meetings/${meeting.id}/video`)
+}
 
   if (loading) {
     return (

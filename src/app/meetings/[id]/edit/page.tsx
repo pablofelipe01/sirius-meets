@@ -46,7 +46,7 @@ interface Meeting {
   max_participants: number
   host_id: string
   invitation_code: string
-  agora_channel: string
+  agora_channel_name: string
   created_at: string
 }
 
@@ -70,6 +70,7 @@ export default function EditMeetingPage({ params }: { params: Promise<{ id: stri
     resolver: zodResolver(meetingSchema)
   })
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const watchedType = watch('meeting_type')
 
   useEffect(() => {

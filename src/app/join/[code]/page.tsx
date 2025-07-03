@@ -1,33 +1,51 @@
 'use client'
 
-import { useState, use, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { createSupabaseClient } from '@/lib/supabase'
-import { Link2, Video, Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { Calendar, Clock, Users, Video } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-export default function JoinMeetingPage({ params }: { params: Promise<{ code: string }> }) {
-  const { code } = use(params)
-  const [loading, setLoading] = useState(true)
-  const [meetingInfo, setMeetingInfo] = useState<any>(null)
-  const [joiningAs, setJoiningAs] = useState<'authenticated' | 'guest' | null>(null)
-  const [guestInfo, setGuestInfo] = useState<any>(null)
-  
+interface Meeting {
+  id: string
+  title: string
+  description: string | null
+  meeting_type: 'virtual' | 'hybrid' | 'in_person'
+  scheduled_start: string
+  scheduled_end: string
+  max_participants: number
+  host_id: string
+  invitation_code: string
+  agora_channel_name: string
+  profiles: {
+    full_name: string | null
+    email: string
+  }
+}
+
+export default function JoinMeetingPage() {
+  const params = useParams()
   const router = useRouter()
-  const supabase = createSupabaseClient()
+  const [meeting, setMeeting] = useState<Meeting | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [joining, setJoining] = useState(false)
+  const supabase = createClientComponentClient()
 
   useEffect(() => {
-    handleJoinFlow()
-  }, [])
+    loadMeetingByCode()
+  }, [params.code])
 
-  async function handleJoinFlow() {
+  async function loadMeetingByCode() {
     try {
-      // Primero verificar si el código es válido
-      const { data: meeting, error: meetingError } = await supabase
+      const code = params.code as string
+      console.log('🔍 Buscando reunión con código:', code)
+
+      // Buscar la reunión por código
+      const { data: meetingData, error: meetingError } = await supabase
         .from('meetings')
         .select(`
           *,
-          profiles:host_id (
+          profiles!meetings_host_id_fkey (
             full_name,
             email
           )
@@ -35,296 +53,170 @@ export default function JoinMeetingPage({ params }: { params: Promise<{ code: st
         .eq('invitation_code', code.toUpperCase())
         .single()
 
-      if (meetingError || !meeting) {
-        // Podría ser un link único de invitación
-        await checkUniqueInvitation()
-        return
-      }
-
-      // Verificar el estado de la reunión
-      const now = new Date()
-      const end = new Date(meeting.scheduled_end)
-
-      if (now > end) {
-        toast.error('Esta reunión ya ha finalizado')
+      if (meetingError || !meetingData) {
+        console.error('Error buscando reunión:', meetingError)
+        toast.error('Código de invitación inválido')
         router.push('/')
         return
       }
 
-      setMeetingInfo(meeting)
+      console.log('✅ Reunión encontrada:', meetingData)
+      setMeeting(meetingData)
+    } catch (error) {
+      console.error('Error:', error)
+      toast.error('Error al buscar la reunión')
+      router.push('/')
+    } finally {
+      setLoading(false)
+    }
+  }
 
+  async function handleJoin() {
+    if (!meeting) return
+    
+    setJoining(true)
+    
+    try {
       // Verificar si el usuario está autenticado
       const { data: { user } } = await supabase.auth.getUser()
-
-      if (user) {
-        // Usuario autenticado - unirse directamente
-        setJoiningAs('authenticated')
-        await joinAsAuthenticatedUser(user.id, meeting.id)
-      } else {
-        // No autenticado - mostrar opciones
-        setLoading(false)
-      }
-    } catch (error) {
-      console.error('Error en flujo de unión:', error)
-      toast.error('Error al procesar la invitación')
-      router.push('/')
-    }
-  }
-
-  async function checkUniqueInvitation() {
-    try {
-      // Buscar si es un código único de invitación
-      const { data: invitation, error } = await supabase
-        .from('meeting_invitations')
-        .select(`
-          *,
-          meetings!inner (
-            *,
-            profiles:host_id (
-              full_name,
-              email
-            )
-          )
-        `)
-        .eq('unique_code', code)
-        .eq('status', 'pending')
-        .single()
-
-      if (error || !invitation) {
-        toast.error('Link de invitación inválido o expirado')
-        router.push('/')
+      
+      if (!user) {
+        // Guardar la URL de destino
+        sessionStorage.setItem('redirectAfterLogin', `/join/${params.code}`)
+        router.push('/auth/login')
         return
       }
 
-      const meeting = invitation.meetings
-
-      // Verificar el estado de la reunión
-      const now = new Date()
-      const end = new Date(meeting.scheduled_end)
-
-      if (now > end) {
-        toast.error('Esta reunión ya ha finalizado')
-        router.push('/')
-        return
-      }
-
-      setMeetingInfo(meeting)
-      setGuestInfo({
-        email: invitation.email,
-        name: invitation.email.split('@')[0] // Usar parte del email como nombre por defecto
-      })
-      setJoiningAs('guest')
-
-      // Actualizar estado de invitación
-      await supabase
-        .from('meeting_invitations')
-        .update({ 
-          status: 'joined',
-          joined_at: new Date().toISOString()
-        })
-        .eq('id', invitation.id)
-
-      // Proceder a unirse
-      await joinAsGuest(invitation)
-    } catch (error) {
-      console.error('Error verificando invitación única:', error)
-      toast.error('Error al verificar la invitación')
-      router.push('/')
-    }
-  }
-
-  async function joinAsAuthenticatedUser(userId: string, meetingId: string) {
-    try {
       // Verificar si ya es participante
       const { data: existingParticipant } = await supabase
         .from('meeting_participants')
         .select('id')
-        .eq('meeting_id', meetingId)
-        .eq('user_id', userId)
+        .eq('meeting_id', meeting.id)
+        .eq('user_id', user.id)
         .single()
 
       if (!existingParticipant) {
         // Agregar como participante
-        const { error } = await supabase
+        const { error: participantError } = await supabase
           .from('meeting_participants')
-          .insert({
-            meeting_id: meetingId,
-            user_id: userId,
-            role: 'participant',
+          .insert([{
+            meeting_id: meeting.id,
+            user_id: user.id,
+            participant_role: 'participant',
             joined_at: new Date().toISOString()
-          })
+          }])
 
-        if (error) throw error
+        if (participantError) {
+          console.error('Error agregando participante:', participantError)
+          toast.error('Error al unirse a la reunión')
+          return
+        }
       }
 
-      // Redirigir a la reunión
-      toast.success('✅ Entrando a la reunión...')
-      router.push(`/meetings/${meetingId}`)
+      // Ir a la sala de video
+      router.push(`/meetings/${meeting.id}/video`)
     } catch (error) {
-      console.error('Error uniéndose como usuario autenticado:', error)
-      toast.error('Error al unirse a la reunión')
-      setLoading(false)
+      console.error('Error al unirse:', error)
+      toast.error('Error al procesar la solicitud')
+    } finally {
+      setJoining(false)
     }
-  }
-
-  async function joinAsGuest(invitation: any) {
-    try {
-      // Guardar información del invitado en sessionStorage
-      sessionStorage.setItem('guestMeetingAccess', JSON.stringify({
-        meetingId: meetingInfo.id,
-        guestEmail: invitation.email,
-        guestName: guestInfo.name,
-        invitationId: invitation.id
-      }))
-
-      // Por ahora mostrar mensaje mientras se implementa la sala de video
-      toast.success('🎉 ¡Bienvenido a la reunión!')
-      
-      // En el futuro, aquí redirigiríamos directamente a la sala de video
-      // router.push(`/meeting-room/${meetingInfo.id}`)
-      
-      setLoading(false)
-      
-      // Mostrar información temporal
-      setTimeout(() => {
-        toast.info('La sala de video estará disponible pronto', {
-          duration: 5000
-        })
-      }, 1000)
-    } catch (error) {
-      console.error('Error uniéndose como invitado:', error)
-      toast.error('Error al unirse a la reunión')
-      setLoading(false)
-    }
-  }
-
-  async function handleLoginRedirect() {
-    sessionStorage.setItem('joinMeetingCode', code)
-    router.push(`/auth/login?join=${code}`)
   }
 
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="h-8 w-8 text-blue-500 animate-spin mx-auto mb-4" />
-          <p className="text-white">Preparando tu acceso a la reunión...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
+          <p className="text-gray-300">Cargando reunión...</p>
         </div>
       </div>
     )
   }
 
-  if (!meetingInfo) {
+  if (!meeting) {
     return null
   }
 
-  // Si es un invitado con link único, mostrar pantalla de bienvenida
-  if (joiningAs === 'guest' && guestInfo) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-        <div className="max-w-md w-full">
-          <div className="bg-slate-800 rounded-lg shadow-lg border border-slate-700 overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 text-white text-center">
-              <Video className="h-16 w-16 mx-auto mb-4" />
-              <h1 className="text-2xl font-bold mb-2">¡Bienvenido!</h1>
-              <p className="text-blue-100">Te has unido exitosamente a la reunión</p>
-            </div>
+  const startDate = new Date(meeting.scheduled_start)
+  const endDate = new Date(meeting.scheduled_end)
+  const now = new Date()
+  const isLive = now >= startDate && now <= endDate
 
-            <div className="p-6 space-y-4">
-              <div className="text-center">
-                <h2 className="text-xl font-semibold text-white mb-2">{meetingInfo.title}</h2>
-                <p className="text-gray-400">Como: {guestInfo.email}</p>
-              </div>
-
-              <div className="bg-blue-600/10 border border-blue-600/30 rounded-lg p-4">
-                <p className="text-sm text-blue-400 text-center">
-                  🎥 La sala de video se abrirá automáticamente cuando esté disponible
-                </p>
-              </div>
-
-              <div className="text-center text-sm text-gray-400">
-                <p>Anfitrión: {meetingInfo.profiles.full_name || meetingInfo.profiles.email}</p>
-                <p>
-                  {new Date(meetingInfo.scheduled_start).toLocaleTimeString('es-ES', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })} - {new Date(meetingInfo.scheduled_end).toLocaleTimeString('es-ES', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Si no está autenticado y es código general, mostrar opciones
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="max-w-md w-full">
-        <div className="bg-slate-800 rounded-lg shadow-lg border border-slate-700 overflow-hidden">
-          <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 text-white">
-            <div className="flex items-center gap-3 mb-2">
-              <Link2 className="h-8 w-8" />
-              <h1 className="text-2xl font-bold">Unirse a Reunión</h1>
-            </div>
-            <p className="text-blue-100">Código: {code}</p>
-          </div>
-
-          <div className="p-6 space-y-4">
-            <div>
-              <h2 className="text-xl font-semibold text-white mb-2">{meetingInfo.title}</h2>
-              {meetingInfo.description && (
-                <p className="text-gray-400">{meetingInfo.description}</p>
-              )}
-            </div>
-
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-3">
-                <span className="text-gray-500">Anfitrión:</span>
-                <span className="text-white">
-                  {meetingInfo.profiles.full_name || meetingInfo.profiles.email}
-                </span>
-              </div>
-              
-              <div className="flex items-center gap-3">
-                <span className="text-gray-500">Hora:</span>
-                <span className="text-white">
-                  {new Date(meetingInfo.scheduled_start).toLocaleTimeString('es-ES', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })} - {new Date(meetingInfo.scheduled_end).toLocaleTimeString('es-ES', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </span>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-700">
-              <p className="text-gray-400 text-sm mb-4">
-                Para unirte a esta reunión necesitas una invitación personal o ser parte del equipo de Sirius.
-              </p>
-              
-              <button
-                onClick={handleLoginRedirect}
-                className="w-full bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg font-medium transition-colors"
-              >
-                Iniciar sesión con cuenta Sirius
-              </button>
-            </div>
-          </div>
+      <div className="max-w-md w-full bg-slate-800 rounded-lg shadow-xl p-8">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-white mb-2">Únete a la reunión</h1>
+          <p className="text-gray-400">Has sido invitado a participar</p>
         </div>
 
-        <div className="text-center mt-6">
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold text-white mb-2">{meeting.title}</h2>
+            {meeting.description && (
+              <p className="text-gray-400">{meeting.description}</p>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 text-gray-300">
+              <Calendar className="h-5 w-5 text-gray-500" />
+              <span>
+                {startDate.toLocaleDateString('es-ES', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3 text-gray-300">
+              <Clock className="h-5 w-5 text-gray-500" />
+              <span>
+                {startDate.toLocaleTimeString('es-ES', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })} - {endDate.toLocaleTimeString('es-ES', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3 text-gray-300">
+              <Users className="h-5 w-5 text-gray-500" />
+              <span>Organizado por {meeting.profiles.full_name || meeting.profiles.email}</span>
+            </div>
+          </div>
+
+          {isLive && (
+            <div className="bg-red-600/20 border border-red-600 rounded-lg p-3 text-center">
+              <p className="text-red-400 font-medium">🔴 Reunión en vivo ahora</p>
+            </div>
+          )}
+
           <button
-            onClick={() => router.push('/')}
-            className="text-gray-400 hover:text-white text-sm transition-colors"
+            onClick={handleJoin}
+            disabled={joining || !isLive}
+            className={`w-full py-3 px-6 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 ${
+              isLive
+                ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+            }`}
           >
-            Volver al inicio
+            {joining ? (
+              <>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                Uniéndose...
+              </>
+            ) : (
+              <>
+                <Video className="h-5 w-5" />
+                {isLive ? 'Unirse a la reunión' : 'La reunión no ha comenzado'}
+              </>
+            )}
           </button>
         </div>
       </div>

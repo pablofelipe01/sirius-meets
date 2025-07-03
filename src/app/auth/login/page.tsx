@@ -74,6 +74,14 @@ export default function LoginPage() {
       .single()
 
     if (profile) {
+      // Verificar si hay una redirección pendiente guardada en sessionStorage
+      const redirectUrl = sessionStorage.getItem('redirectAfterLogin')
+      if (redirectUrl && profile.status === 'approved') {
+        sessionStorage.removeItem('redirectAfterLogin')
+        router.push(redirectUrl)
+        return
+      }
+
       // Si viene de una invitación y está aprobado
       if (joinCode && profile.status === 'approved') {
         const storedCode = sessionStorage.getItem('joinMeetingCode')
@@ -114,7 +122,7 @@ export default function LoginPage() {
       if (authData.user) {
         await handlePostLogin(authData.user.id)
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Error en login:', error)
       toast.error(error.message || 'Error al iniciar sesión')
     } finally {
@@ -162,7 +170,7 @@ export default function LoginPage() {
 
       toast.success('¡Registro exitoso! Tu cuenta está pendiente de aprobación.')
       router.push('/auth/pending')
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Error en registro:', error)
       toast.error(error.message || 'Error al registrarse')
     } finally {

@@ -7,7 +7,7 @@
 
 ## 🎯 RESUMEN EJECUTIVO
 
-**Sirius Meetings** es una plataforma de reuniones virtuales y presenciales exclusiva para Sirius Regenerative. El proyecto cuenta con autenticación completa, CRUD de reuniones y sistema de participantes funcional. Listo para integración con tecnología de video de Sirius Agentics IA.
+**Sirius Meetings** es una plataforma de reuniones virtuales y presenciales exclusiva para Sirius Regenerative. El proyecto cuenta con autenticación completa, CRUD de reuniones y sistema de participantes funcional. Listo para integración con tecnología de video de Agora.io.
 
 **URL Local:** http://localhost:3000  
 **Stack:** Next.js 14 + TypeScript + Supabase + Tailwind CSS
@@ -144,7 +144,7 @@ sirius-meetings/
 
 ### **Fase 2 - Video y Comunicación (Próximo)**
 - [x] Sistema de participantes e invitaciones ✅
-- [ ] Integración SDK de video Sirius Agentics IA
+- [ ] Integración SDK de video Agora.io
 - [ ] Sala de video/audio funcional
 - [ ] Chat en reunión
 - [ ] Compartir pantalla
